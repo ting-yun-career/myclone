@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Listening Avatar — VAD + Whisper</title>
+<!-- Classic scripts: ONNX Runtime then Silero VAD (exposes window.vad) -->
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.31.1/dist/ort.wasm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.31/dist/bundle.min.js"></script>
+<style>
+  :root {
+    --bg: #0d1016; --panel: #151a23; --line: #232b38; --text: #e8ecf3; --muted: #8b95a7;
+    --accent: #6ea8ff; --listen: #4ade80; --think: #fbbf24; --err: #f87171;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: radial-gradient(120% 90% at 50% 0%, #1b2332 0%, var(--bg) 60%);
+    color: var(--text); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: grid; grid-template-rows: 1fr auto; height: 100dvh;
+  }
+  #stageWrap { display: grid; grid-template-rows: 1fr auto; min-height: 0; }
+  #view { position: relative; min-height: 0; }
+  #stage { width: 100%; height: 100%; display: block; }
+
+  #pill {
+    position: absolute; top: 14px; left: 14px; display: flex; align-items: center; gap: 8px;
+    padding: 7px 12px; border-radius: 999px; background: rgba(21,26,35,.78);
+    border: 1px solid var(--line); backdrop-filter: blur(8px); font-size: 13px; max-width: calc(100% - 28px);
+  }
+  #pill .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
+  #pill[data-state="listening"] .dot { background: var(--listen); box-shadow: 0 0 0 4px rgba(74,222,128,.2); }
+  #pill[data-state="thinking"] .dot { background: var(--think); animation: pulse 1s infinite; }
+  #pill[data-state="happy"] .dot { background: var(--accent); }
+  #pill[data-state="error"] .dot { background: var(--err); }
+  #pillText { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @keyframes pulse { 50% { opacity: .35; } }
+
+  #caption {
+    position: absolute; top: 62px; left: 14px; padding: 8px 12px; border-radius: 12px;
+    max-width: min(360px, calc(100% - 28px)); max-height: calc(100% - 76px); overflow: hidden;
+    background: rgba(21,26,35,.78); border: 1px solid var(--line); backdrop-filter: blur(8px);
+    font-size: 16px; font-weight: 500;
+  }
+  #caption:empty { display: none; }
+  #caption.fade { animation: capin .35s ease-out; }
+  @keyframes capin { from { opacity: 0; transform: translateY(6px); } }
+
+  #barWrap { position: absolute; left: 14px; right: 14px; top: 52px; height: 4px; background: var(--line); border-radius: 4px; overflow: hidden; }
+  #bar { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+
+</style>
+</head>
+<body>
+  <div id="stageWrap">
+    <div id="view">
+      <canvas id="stage"></canvas>
+      <div id="pill" data-state="loading"><span class="dot"></span><span id="pillText">Loading character…</span></div>
+      <div id="barWrap" hidden><div id="bar"></div></div>
+      <div id="caption" aria-live="polite"></div>
+    </div>
+  </div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

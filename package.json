@@ -1,0 +1,17 @@
+{
+  "name": "listening-avatar",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --open",
+    "start": "vite --open"
+  },
+  "devDependencies": {
+    "vite": "^7.0.0"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^4.3.2",
+    "three": "^0.170.0"
+  }
+}
