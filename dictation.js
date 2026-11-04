@@ -2,16 +2,17 @@ const RESTART_DELAY_MS = 250;
 
 /**
  * Live dictation with Chrome's built-in speech recognition. Chrome sends the audio to Google.
- * Handlers: onReady, onSpeechStart, onSpeechEnd, onFrame, onInterim, onText, onError
+ * Handlers: onReady, onSpeechStart, onSpeechEnd, onFrame, onInterim, onText, onError, onYield, isEcho
  */
 export class BrowserDictation {
   constructor(handlers = {}) {
     this.h = handlers;
     this.running = false;
-    this.paused = false;
     this.active = false;
     this.speaking = false;
     this.interim = '';
+    this.restartTimer = null;
+    this.yielded = false;
   }
 
   async loadModel() {
@@ -33,7 +34,12 @@ export class BrowserDictation {
         resolve();
       };
       this.recognition.onerror = (e) => {
-        if (e.error === 'no-speech' || e.error === 'aborted') return;
+        if (e.error === 'no-speech') return;
+        if (e.error === 'aborted') {
+          this.yielded = true; // another tab took the session
+          this.h.onYield?.();
+          return;
+        }
         this.running = false;
         if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
           const denied = new Error('Microphone permission was denied');
@@ -52,28 +58,32 @@ export class BrowserDictation {
         this._closeUtterance();
         this._restartSoon();
       };
-      this.recognition.start();
+      document.addEventListener('visibilitychange', () => this._onVisibilityChange());
+      addEventListener('focus', () => this._reclaim());
+      addEventListener('pointerdown', () => this._reclaim());
+      if (document.hidden) resolve();
+      else this.recognition.start();
     });
   }
 
+  // Chrome runs one recognition session at a time, and open tabs would keep aborting each other.
+  // The tab that started last keeps it. A hidden tab lets go, and a tab the user returns to takes it back.
+  _onVisibilityChange() {
+    if (!document.hidden) this._reclaim();
+    else if (this.active) this.recognition.stop();
+  }
+
+  _reclaim() {
+    if (!this.yielded) return;
+    this.yielded = false;
+    this._restartSoon();
+  }
+
   _restartSoon() {
-    setTimeout(() => {
-      if (this.running && !this.paused && !this.active) this.recognition.start();
+    clearTimeout(this.restartTimer);
+    this.restartTimer = setTimeout(() => {
+      if (this.running && !this.active && !this.yielded && !document.hidden) this.recognition.start();
     }, RESTART_DELAY_MS);
-  }
-
-  // Stops listening while the avatar talks, so the microphone does not transcribe its voice.
-  pause() {
-    if (this.paused) return;
-    this.paused = true;
-    this.interim = '';
-    if (this.active) this.recognition.abort();
-  }
-
-  resume() {
-    if (!this.paused) return;
-    this.paused = false;
-    if (!this.active) this._restartSoon();
   }
 
   _onResult(e) {
@@ -81,13 +91,14 @@ export class BrowserDictation {
     for (let i = e.resultIndex; i < e.results.length; i++) {
       const text = e.results[i][0].transcript;
       if (e.results[i].isFinal) {
+        if (this._isEcho(text)) continue;
         this.interim = text;
         this._closeUtterance();
       } else {
         interim += text;
       }
     }
-    if (!interim.trim()) return;
+    if (!interim.trim() || this._isEcho(interim)) return;
     if (!this.speaking) {
       this.speaking = true;
       this.h.onSpeechStart?.();
@@ -95,6 +106,11 @@ export class BrowserDictation {
     this.interim = interim;
     this.h.onFrame?.(1);
     this.h.onInterim?.(interim.trim());
+  }
+
+  // Once the user is talking, nothing more is treated as the avatar's voice.
+  _isEcho(text) {
+    return !this.speaking && Boolean(this.h.isEcho?.(text));
   }
 
   _closeUtterance() {
@@ -142,10 +158,6 @@ export class DemoDictation {
     };
     this.timer = setTimeout(cycle, 800);
   }
-
-  pause() {}
-
-  resume() {}
 
   async stop() {
     clearTimeout(this.timer);

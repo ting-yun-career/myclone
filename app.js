@@ -10,8 +10,8 @@ const DEMO_CHAT = params.has('demochat');
 const FAKE_NEURONS = params.get('neurons'); // test hook: ?neurons=9700 pretends 9,700 neurons are used
 const SLEEP_AT = 0.95;
 const NEURON_POLL_MS = 60000;
-const MIC_RESUME_DELAY_MS = 300; // lets the end of the avatar's voice fade before the microphone reopens
 const SLEEP_REASON = { budget: 'chat budget nearly used up', chat: 'chat unavailable' };
+const ONE_TAB_NOTICE = 'Voice input moved to another tab running this site. For the best experience, please keep the site open in only one tab.';
 const BUDGET_NOTICE = 'Sleeping. The daily chat budget is nearly used up. It resets at 00:00 UTC.';
 
 class App {
@@ -22,6 +22,7 @@ class App {
       said: $('said'),
       statusMain: $('statusMain'),
       statusNeurons: $('statusNeurons'),
+      statusSound: $('statusSound'),
       statusVoice: $('statusVoice'),
       status: $('status'),
       caption: $('caption'),
@@ -35,6 +36,8 @@ class App {
     this.thinking = false;
     this.replying = false;
     this.utteranceId = 0;
+    this.typing = false;
+    this.tabNoticeShown = false;
     this.sleepReason = null;
     this.neurons = null;
     this.lastPoll = 0;
@@ -42,18 +45,15 @@ class App {
     this.chatStatus = 'Connecting to chat model…';
 
     this.character = new Character($('stage'));
-    this.speaker = new Speaker({
-      onStart: () => {
-        clearTimeout(this.micResumeTimer);
-        this.dictation.pause();
-        this.refresh();
-      },
-      onIdle: () => {
-        this.micResumeTimer = setTimeout(() => this.dictation.resume(), MIC_RESUME_DELAY_MS);
-        this.refresh();
-      },
-    });
+    this.speaker = new Speaker({ onStart: () => this.refresh(), onIdle: () => this.refresh() });
     const handlers = {
+      isEcho: (text) => this.speaker.isEcho(text),
+      onYield: () => {
+        this.refresh();
+        if (this.tabNoticeShown) return;
+        this.tabNoticeShown = true;
+        setTimeout(() => alert(ONE_TAB_NOTICE));
+      },
       onReady: (device) => {
         this.modelReady = true;
         this.setStatus(device === 'demo' ? 'Demo mode' : `Model ready (${device})`);
@@ -112,6 +112,9 @@ class App {
     });
 
     this.ui.caption.addEventListener('keydown', (e) => this.onCaptionKey(e));
+    this.ui.caption.addEventListener('input', () => {
+      this.typing = this.ui.caption.value.trim() !== '';
+    });
 
     setInterval(() => this.refresh(), 250); // lets the "happy" state expire
     this.pollNeurons();
@@ -136,7 +139,7 @@ class App {
   }
 
   get editing() {
-    return document.activeElement === this.ui.caption;
+    return this.typing && document.activeElement === this.ui.caption;
   }
 
   get asleep() {
@@ -196,6 +199,7 @@ class App {
   // The sent message moves from the input to the line above it.
   showSent(text) {
     this.ui.caption.value = '';
+    this.typing = false;
     this.ui.said.textContent = text;
     this.ui.said.classList.remove('fade');
     void this.ui.said.offsetWidth;
@@ -291,12 +295,13 @@ class App {
 
   renderStatus() {
     const { neurons } = this;
-    const voice = this.budgetSleep || this.speaker.speaking ? 'paused' : this.running ? 'on' : 'off';
+    const voice = this.budgetSleep ? 'paused' : this.dictation.yielded ? 'in another tab' : this.running ? 'on' : 'off';
     const lines = [
       this.asleep ? `Status: Sleeping (${SLEEP_REASON[this.sleepReason]})` : `Status: Awake${DEMO_CHAT ? ' (scripted replies)' : ''}`,
       this.editing ? '' : `Voice: ${voice}`,
       neurons ? `Token: ${Math.max(0, Math.round(100 - (100 * neurons.used) / neurons.limit))}% left` : 'Token: ?',
     ];
+    this.ui.statusSound.hidden = !this.speaker.needsGesture;
     const text = lines.join('\n');
     if (text === this.statusText) return;
     this.statusText = text;

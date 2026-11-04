@@ -64,6 +64,7 @@
   #status strong { font-weight: 600; color: var(--listen); }
   #status[data-sleeping] strong { color: var(--think); }
   #status span { color: var(--muted); }
+  #status span[hidden] { display: none; }
 
 </style>
 </head>
@@ -76,6 +77,7 @@
         <strong id="statusMain">Status: Awake</strong>
         <span id="statusVoice"></span>
         <span id="statusNeurons"></span>
+        <span id="statusSound" hidden>Sound: click page to enable</span>
       </aside>
       <div id="user">
         <p id="said" aria-live="polite"></p>
