@@ -1,11 +1,11 @@
-const PREFERRED_VOICES = ['Google UK English Male', 'Google US English'];
+const MALE_VOICES = ['Google UK English Male', 'Microsoft Guy', 'Microsoft Ryan', 'Microsoft David', 'Microsoft Mark', 'Daniel', 'Alex', 'Fred'];
 const MIN_WATCHDOG_MS = 8000;
 const WATCHDOG_MS_PER_CHAR = 150;
 
 const pickVoice = () => {
   const voices = speechSynthesis.getVoices();
-  for (const name of PREFERRED_VOICES) {
-    const voice = voices.find((v) => v.name === name);
+  for (const name of MALE_VOICES) {
+    const voice = voices.find((v) => v.name.startsWith(name));
     if (voice) return voice;
   }
   return voices.find((v) => v.lang.startsWith('en')) ?? null;
