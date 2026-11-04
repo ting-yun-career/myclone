@@ -28,6 +28,18 @@ const EYE_REST_PITCH = THREE.MathUtils.degToRad(-7);
 const SKIN_TINT = 0xf3c9b0;
 const SKIN_GLOW = 0x2b140c;
 
+const FAST_MORPHS = /^(jawOpen|mouthFunnel|mouthPucker|mouthStretch|mouthPress|mouthRollLower)/;
+const VISEMES = [
+  [/[a]/, { jawOpen: 0.18 }],
+  [/[o]/, { jawOpen: 0.12, mouthFunnel: 0.4 }],
+  [/[uw]/, { jawOpen: 0.08, mouthPucker: 0.5 }],
+  [/[e]/, { jawOpen: 0.1, mouthStretch_L: 0.25, mouthStretch_R: 0.25 }],
+  [/[iy]/, { jawOpen: 0.06, mouthStretch_L: 0.3, mouthStretch_R: 0.3 }],
+  [/[mbp]/, { mouthPress_L: 0.45, mouthPress_R: 0.45 }],
+  [/[fv]/, { jawOpen: 0.05, mouthRollLower: 0.4 }],
+];
+const VISEME_DEFAULT = { jawOpen: 0.06 };
+
 const clamp01 = (v) => Math.min(1, Math.max(0, v));
 const rand = (a, b) => a + Math.random() * (b - a);
 
@@ -111,6 +123,8 @@ export class Character {
 
     this.eyes = ['eyeLeft', 'eyeRight'].map((n) => model.getObjectByName(n)).filter(Boolean);
     this._styleEyes(model);
+    // The teeth mesh does not follow the jaw and shows as fangs in the mouth corners.
+    for (const teeth of this._eyeMeshes(model, 'teeth')) teeth.visible = false;
 
     // Centre the model so head rotations pivot around the middle of the bust.
     const box = new THREE.Box3().setFromObject(model);
@@ -201,11 +215,18 @@ export class Character {
             ${segments}
             browMask = (1.0 - smoothstep(-70.0, 40.0, d)) * ${BROW_STRENGTH.toFixed(2)};
             diffuseColor.rgb = mix(diffuseColor.rgb, ${BROW_COLOR}, browMask);
-          }`)
+          }
+          // Inside of the mouth: back faces, and surfaces set deeper than the lips.
+          float mouthX = vRest.x - ${FACE_CENTRE_X.toFixed(1)};
+          float lipFront = 12674.0 - 4.74e-4 * mouthX * mouthX;
+          float mouthInside = step(abs(mouthX), 1500.0) * step(11100.0, vRest.z) * step(vRest.z, 12000.0) * smoothstep(300.0, 450.0, lipFront - vRest.y);
+          if (!gl_FrontFacing) mouthInside = 1.0;
+          diffuseColor.rgb *= 1.0 - 0.92 * mouthInside;`)
         .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
-          roughnessFactor = mix(roughnessFactor, 1.0, browMask);`)
+          roughnessFactor = mix(roughnessFactor, 1.0, max(browMask, mouthInside));`)
         .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
-          totalEmissiveRadiance *= 1.0 - browMask;`);
+          totalEmissiveRadiance *= 1.0 - browMask;
+          totalEmissiveRadiance *= 1.0 - mouthInside;`);
     };
   }
 
@@ -278,6 +299,12 @@ export class Character {
     this.nextGazeAt = 0;
   }
 
+  // Moves the lips through one word, letter by letter. Non-Latin text gets one open-close shape.
+  sayWord(word, ms) {
+    const letters = word.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+    this.talk = { letters: /^[a-z0-9]+$/.test(letters) ? letters : 'a', start: this.time, seconds: Math.min(ms, 170 + 35 * word.length) / 1000 };
+  }
+
   setSpeech(p) {
     this.speech = p;
   }
@@ -333,6 +360,15 @@ export class Character {
         this.gazeTarget = { x: -0.3, y: 0.2 };
         break;
 
+      case 'speaking':
+        both('mouthSmile', 0.1);
+        t.browInnerUp = 0.06;
+        pose.pitch = 0.012 * Math.sin(time * 1.9);
+        pose.yaw = 0.03 * Math.sin(time * 0.7);
+        pose.roll = 0.015 * Math.sin(time * 0.5);
+        this._wander(0.14, 0.08, 1.2, 3, 0.7);
+        break;
+
       case 'happy':
         both('mouthSmile', 0.75);
         both('cheekSquint', 0.4);
@@ -384,6 +420,18 @@ export class Character {
       lips.jawOpen += 0.06;
     }
     for (const n in lips) t[n] = (t[n] ?? 0) + lips[n];
+
+    if (this.talk) {
+      const k = (time - this.talk.start) / this.talk.seconds;
+      if (k >= 1) {
+        this.talk = null;
+      } else {
+        const { letters } = this.talk;
+        const letter = letters[Math.floor(k * letters.length)];
+        const shape = VISEMES.find(([re]) => re.test(letter))?.[1] ?? VISEME_DEFAULT;
+        for (const n in shape) t[n] = (t[n] ?? 0) + shape[n];
+      }
+    }
 
     // Eye gaze -> blend shapes, with a tiny constant drift so the eyes never freeze.
     const x = this.gaze.x + this.saccade.x + 0.025 * Math.sin(time * 1.7) + 0.015 * Math.sin(time * 4.3);
@@ -454,7 +502,7 @@ export class Character {
     for (const n of names) {
       const target = morphs[n] ?? 0;
       const c = this.cur[n] ?? 0;
-      this.cur[n] = c + (target - c) * ease(n.startsWith('eyeLook') ? 12 : 5);
+      this.cur[n] = c + (target - c) * ease(n.startsWith('eyeLook') ? 12 : FAST_MORPHS.test(n) ? 24 : 5);
     }
 
     for (const mesh of this.morphMeshes) {

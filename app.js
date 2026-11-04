@@ -1,9 +1,13 @@
 import { Character } from './character.js';
 import { Dictation, DemoDictation } from './dictation.js';
+import { Chat, DemoChat, isCjk } from './chat.js';
 
 const $ = (id) => document.getElementById(id);
 const MODEL = 'onnx-community/whisper-base';
-const DEMO = new URLSearchParams(location.search).has('demo');
+const CHAT_MODEL = 'onnx-community/Qwen2.5-0.5B-Instruct';
+const params = new URLSearchParams(location.search);
+const DEMO = params.has('demo');
+const DEMO_CHAT = params.has('demochat');
 
 class App {
   constructor() {
@@ -11,6 +15,7 @@ class App {
       pill: $('pill'),
       pillText: $('pillText'),
       caption: $('caption'),
+      reply: $('reply'),
       bar: $('bar'),
       barWrap: $('barWrap'),
     };
@@ -20,6 +25,10 @@ class App {
     this.running = false;
     this.busy = false;
     this.happyUntil = 0;
+    this.thinking = false;
+    this.replying = false;
+    this.chatStatus = 'Loading chat model…';
+    this.chatFiles = new Map();
     this.fileProgress = new Map();
 
     this.character = new Character($('stage'));
@@ -33,6 +42,9 @@ class App {
       },
       onSpeechStart: () => {
         this.speaking = true;
+        this.chat.interrupt();
+        this.thinking = false;
+        this.replying = false;
         this.refresh();
       },
       onSpeechEnd: () => {
@@ -49,6 +61,38 @@ class App {
       onError: (msg) => this.fail(msg),
     };
     this.dictation = DEMO ? new DemoDictation(handlers) : new Dictation(handlers);
+
+    const ChatClass = DEMO_CHAT ? DemoChat : Chat;
+    this.chat = new ChatClass({
+      onProgress: (p) => this.showChatProgress(p),
+      onReady: (device) => {
+        console.info(`Chat model ready on ${device}`);
+        this.chatStatus = null;
+        this.ui.barWrap.hidden = true;
+        this.refresh();
+      },
+      onLoadFailed: () => {
+        this.chatStatus = 'Chat model could not load';
+        this.ui.barWrap.hidden = true;
+        this.thinking = false;
+        this.refresh();
+      },
+      onThinking: () => {
+        this.thinking = true;
+        this.refresh();
+      },
+      onWord: (word, ms, first) => this.showWord(word, ms, first),
+      onReplyEnd: () => {
+        this.replying = false;
+        this.refresh();
+      },
+      onReplyFailed: () => {
+        this.thinking = false;
+        this.replying = false;
+        this.ui.reply.textContent = 'Sorry, I lost my train of thought.';
+        this.refresh();
+      },
+    });
 
     setInterval(() => this.refresh(), 250); // lets the "happy" state expire
   }
@@ -80,12 +124,40 @@ class App {
     this.setStatus(`Downloading model… ${avg.toFixed(0)}%`);
   }
 
+  showChatProgress(p) {
+    if (!p || p.status !== 'progress' || !p.total) return;
+    this.chatFiles.set(p.file, p);
+    const files = [...this.chatFiles.values()];
+    const loaded = files.reduce((a, f) => a + f.loaded, 0);
+    const total = files.reduce((a, f) => a + f.total, 0);
+    const percent = Math.round((loaded / total) * 100);
+    this.ui.barWrap.hidden = false;
+    this.ui.bar.style.width = `${percent}%`;
+    this.chatStatus = percent < 100 ? `Downloading chat model… ${percent}%` : 'Starting chat model…';
+    this.refresh();
+  }
+
   addLine(text) {
     this.ui.caption.textContent = text;
     this.ui.caption.classList.remove('fade');
     void this.ui.caption.offsetWidth;
     this.ui.caption.classList.add('fade');
-    this.happyUntil = performance.now() + 1600;
+    this.thinking = true;
+    this.chat.send(text);
+    this.refresh();
+  }
+
+  showWord(word, ms, first) {
+    if (first) this.ui.reply.textContent = '';
+    this.thinking = false;
+    this.replying = true;
+    const span = document.createElement('span');
+    span.className = 'word';
+    span.textContent = word;
+    if (this.ui.reply.childNodes.length && !isCjk(word) && !isCjk(this.ui.reply.lastChild.textContent)) this.ui.reply.append(' ');
+    this.ui.reply.append(span);
+    this.ui.reply.scrollTop = this.ui.reply.scrollHeight;
+    this.character.sayWord(word, ms);
     this.refresh();
   }
 
@@ -103,12 +175,19 @@ class App {
     let state = 'idle';
     if (this.busy && !this.modelReady) state = 'loading';
     else if (this.speaking) state = 'listening';
-    else if (this.pending > 0) state = 'thinking';
+    else if (this.replying) state = 'speaking';
+    else if (this.pending > 0 || this.thinking) state = 'thinking';
     else if (performance.now() < this.happyUntil) state = 'happy';
     this.character.setState(state);
     this.ui.pill.dataset.state = state;
     if (this.running && this.modelReady) {
-      const label = { idle: 'Listening…', listening: 'Hearing you', thinking: 'Transcribing…', happy: 'Got it' }[state];
+      const label = {
+        idle: this.chatStatus || 'Listening…',
+        listening: 'Hearing you',
+        thinking: this.pending > 0 ? 'Transcribing…' : this.chat.ready ? 'Thinking…' : this.chatStatus,
+        speaking: 'Speaking',
+        happy: 'Got it',
+      }[state];
       if (label) this.setStatus(label);
     }
   }
@@ -125,6 +204,7 @@ class App {
       this.setStatus('Asking for microphone…');
       await this.dictation.start();
       this.running = true;
+      this.chat.load(CHAT_MODEL);
     } catch (err) {
       this.fail(err?.name === 'NotAllowedError' ? 'Microphone permission was denied' : `Error: ${err?.message || err}`);
     } finally {

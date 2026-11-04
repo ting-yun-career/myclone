@@ -152,7 +152,7 @@ export class DemoDictation {
         setTimeout(() => {
           this.h.onPending?.(0);
           this.h.onText?.(lines[i++ % lines.length], 640);
-          this.timer = setTimeout(cycle, 3000);
+          this.timer = setTimeout(cycle, 25000);
         }, 1200);
       }, 2200);
     };
