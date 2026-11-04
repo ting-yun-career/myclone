@@ -1,8 +1,11 @@
 const CJK_CHARS = '\\u3000-\\u303f\\u3400-\\u9fff\\uf900-\\ufaff\\uff00-\\uffef';
 const WORD = new RegExp(`[${CJK_CHARS}]|[^\\s${CJK_CHARS}]+`, 'g');
 const CJK = new RegExp(`^[${CJK_CHARS}]$`);
+const API = '/api/ollama';
+const MODEL = import.meta.env.VITE_OLLAMA_MODEL;
+const MAX_TOKENS = 150;
 const HISTORY_LIMIT = 10;
-const SYSTEM_PROMPT = 'You are a friendly person having a spoken conversation. Reply in one or two short, natural sentences. Use plain words. Do not use lists or markdown.';
+const SYSTEM_PROMPT = 'You are a helpful, knowledgeable assistant talking out loud with a friend. Answer the question directly and correctly in one or two short sentences. Do not use emoji, lists or markdown.';
 
 export const isCjk = (word) => CJK.test(word);
 
@@ -16,90 +19,116 @@ const wordDuration = (word) => {
   return ms;
 };
 
+const failureMessage = (status) => {
+  if (status === 401 || status === 403) return 'The chat server refused the request.';
+  if (status === 404) return 'The chat model is not installed on the server.';
+  if (status === 429) return 'The chat server is busy. Try again soon.';
+  return 'The chat server is not reachable.';
+};
+
 /**
- * Conversation with a local LLM. Replies come out one word at a time, at speaking pace.
- * Handlers: onProgress, onReady, onLoadFailed, onThinking, onWord, onReplyEnd, onReplyFailed
+ * Conversation through the Ollama proxy. Replies come out one word at a time, at speaking pace.
+ * Handlers: onReady, onLoadFailed, onThinking, onWord, onReplyEnd, onReplyFailed
  */
 export class Chat {
   constructor(handlers = {}) {
     this.h = handlers;
-    this.ready = false;
     this.history = [];
-    this.waiting = null; // text said before the model was ready
     this.replyId = 0;
     this.words = [];
     this.tail = '';
     this.spoken = [];
     this.generating = false;
     this.timer = null;
+    this.request = null;
   }
 
   get active() {
     return this.generating || this.timer !== null || this.words.length > 0;
   }
 
-  load(model) {
-    this.worker = new Worker(new URL('./chat-worker.js', import.meta.url), { type: 'module' });
-    this.worker.onerror = (e) => {
-      console.error('Chat worker failed to start', e);
-      this.h.onLoadFailed?.();
-    };
-    this.worker.onmessage = (e) => this._onMessage(e.data);
-    this.worker.postMessage({ type: 'load', model });
-  }
-
-  _onMessage(m) {
-    switch (m.type) {
-      case 'progress':
-        this.h.onProgress?.(m.p);
-        break;
-      case 'ready':
-        this.ready = true;
-        this.h.onReady?.(m.device);
-        if (this.waiting) {
-          const text = this.waiting;
-          this.waiting = null;
-          this.send(text);
-        }
-        break;
-      case 'token':
-        if (m.id === this.replyId) this._addText(m.text);
-        break;
-      case 'done':
-        if (m.id !== this.replyId) break;
-        this.generating = false;
-        this._addText(' ');
-        this._pump();
-        break;
-      case 'error':
-        if (m.id === undefined) {
-          this.h.onLoadFailed?.();
-        } else if (m.id === this.replyId) {
-          this.generating = false;
-          this.h.onReplyFailed?.();
-        }
-        break;
+  // Checks that the server answers and has the model. Replies are still attempted if this fails.
+  async load() {
+    try {
+      const res = await fetch(`${API}/models`);
+      if (!res.ok) return this.h.onLoadFailed?.(failureMessage(res.status));
+      const { data } = await res.json();
+      if (!data.some((m) => m.id === MODEL)) return this.h.onLoadFailed?.(failureMessage(404));
+      this.h.onReady?.();
+    } catch (err) {
+      console.error('Chat server check failed', err);
+      this.h.onLoadFailed?.(failureMessage());
     }
   }
 
   send(text) {
     this.interrupt();
     this.history.push({ role: 'user', content: text });
-    if (!this.ready) {
-      this.history.pop();
-      this.waiting = text;
-      return;
-    }
     this.generating = true;
     this.h.onThinking?.();
+    this._stream(++this.replyId);
+  }
+
+  // Sends a corrected message in place of the last exchange.
+  replaceLast(text) {
+    this.interrupt();
+    if (this.history.at(-1)?.role === 'assistant') this.history.pop();
+    if (this.history.at(-1)?.role === 'user') this.history.pop();
+    this.send(text);
+  }
+
+  async _stream(id) {
+    this.request = new AbortController();
     const messages = [{ role: 'system', content: SYSTEM_PROMPT }, ...this.history.slice(-HISTORY_LIMIT)];
-    this.worker.postMessage({ type: 'generate', id: ++this.replyId, messages });
+    try {
+      const res = await fetch(`${API}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: MODEL, stream: true, max_tokens: MAX_TOKENS, messages }),
+        signal: this.request.signal,
+      });
+      if (!res.ok) return this._fail(id, failureMessage(res.status));
+      const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+      let buffer = '';
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += value;
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data: {') || id !== this.replyId) continue;
+          const content = JSON.parse(line.slice(6)).choices[0]?.delta?.content;
+          if (content) this._addText(content);
+        }
+      }
+      this._finish(id);
+    } catch (err) {
+      if (err.name === 'AbortError') return;
+      console.error('Chat reply failed', err);
+      this._fail(id, failureMessage());
+    }
+  }
+
+  _finish(id) {
+    if (id !== this.replyId) return;
+    this.generating = false;
+    this._addText(' ');
+    if (!this.spoken.length && !this.words.length) this.h.onReplyEnd?.();
+  }
+
+  _fail(id, message) {
+    if (id !== this.replyId) return;
+    if (this.spoken.length || this.words.length) return this._finish(id);
+    this.generating = false;
+    this.history.pop();
+    this.h.onReplyFailed?.(message);
   }
 
   // The listener started talking: stop at the current word and remember what was said.
   interrupt() {
     if (!this.active) return;
-    if (this.generating) this.worker.postMessage({ type: 'interrupt' });
+    this.request?.abort();
     this.replyId++;
     this.generating = false;
     clearTimeout(this.timer);
@@ -143,11 +172,10 @@ export class Chat {
   }
 }
 
-/** Scripted stand-in so the reply flow can be previewed without downloading a model (?demochat). */
+/** Scripted stand-in so the reply flow can be previewed without the server (?demochat). */
 export class DemoChat extends Chat {
   load() {
-    this.ready = true;
-    this.h.onReady?.('demo');
+    this.h.onReady?.();
   }
 
   send(text) {
@@ -155,10 +183,10 @@ export class DemoChat extends Chat {
     this.generating = true;
     this.h.onThinking?.();
     const id = ++this.replyId;
-    const reply = 'Yes, I can hear you clearly. What would you like to talk about today?';
     setTimeout(() => {
-      this._onMessage({ type: 'token', id, text: reply });
-      this._onMessage({ type: 'done', id });
+      if (id !== this.replyId) return;
+      this._addText('Yes, I can hear you clearly. What would you like to talk about today?');
+      this._finish(id);
     }, 800);
   }
 }

@@ -40,11 +40,13 @@
     position: absolute; top: 62px; left: 14px; padding: 8px 12px; border-radius: 12px;
     max-width: min(360px, calc(100% - 28px)); max-height: calc(100% - 76px); overflow: hidden;
     background: rgba(21,26,35,.78); border: 1px solid var(--line); backdrop-filter: blur(8px);
-    font-size: 16px; font-weight: 500;
+    font: 500 16px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--text);
+    width: min(360px, calc(100% - 28px)); field-sizing: content; resize: none;
   }
-  #caption:empty { display: none; }
+  #caption[hidden] { display: none; }
+  #caption:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   #reply {
-    position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%);
+    position: absolute; left: 50%; top: 81%; transform: translateX(-50%);
     width: min(680px, calc(100% - 28px)); max-height: 17%; overflow: hidden; text-align: center;
     font-size: clamp(17px, 2.2vw, 20px); font-weight: 500;
   }
@@ -64,7 +66,7 @@
       <canvas id="stage"></canvas>
       <div id="pill" data-state="loading"><span class="dot"></span><span id="pillText">Loading character…</span></div>
       <div id="barWrap" hidden><div id="bar"></div></div>
-      <div id="caption" aria-live="polite"></div>
+      <textarea id="caption" rows="1" maxlength="2000" aria-label="Your message. Edit it and press Enter to send it again." hidden></textarea>
       <div id="reply" aria-live="polite"></div>
     </div>
   </div>
