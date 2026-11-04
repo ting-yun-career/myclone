@@ -5,19 +5,24 @@ const CHAT_URL = '/api/ai/chat/completions';
 const MODEL = import.meta.env.VITE_CF_MODEL;
 const MAX_TOKENS = 150;
 const HISTORY_LIMIT = 10;
+// The gateway streams a bare number token as a JSON number and drops its leading space.
+const NUMBER_NEEDS_SPACE = /(\p{L}|[,;:!?]|\D\.)$/u;
 const EMOJI = /[\p{Extended_Pictographic}\u{FE0F}\u{200D}]/gu;
 const SYSTEM_PROMPT = 'You are John Smith, a warm person talking out loud with someone. Stay John Smith at all times. Always reply in one or two short sentences, never more than 25 words, even when explaining something. Answer questions directly and correctly. Do not use emoji, lists or markdown.';
 
-const CORRECTION_PROMPT = 'You fix speech recognition errors. The input is what a speech recognizer heard. A word may be misheard as a similar-sounding word, which makes the phrase odd or impossible. Replace such words with the word the speaker meant. Keep all other words and punctuation exactly as they are. Do not rephrase, answer, translate or add anything. If nothing is wrong, return the input unchanged. Return only the sentence.';
+const CORRECTION_PROMPT = 'You fix speech recognition errors. The input has two lines. "Previous" is what the listener was replying to. "Heard" is what a speech recognizer heard. A word in "Heard" may be a similar-sounding wrong word, or a spelling mistake. Use "Previous" to judge which word fits. Replace the wrong word with the word the speaker meant. Keep all other words and punctuation exactly as they are. Do not rephrase, answer, translate or add anything. If nothing is wrong, return "Heard" unchanged. Return only the corrected "Heard" text.';
+const asCorrectionInput = (previous, heard) => `Previous: ${previous || '(none)'}\nHeard: ${heard}`;
 const CORRECTION_EXAMPLES = [
-  ['My favorite ice cream is meat chocolate.', 'My favorite ice cream is mint chocolate.'],
-  ['I want to by a new car.', 'I want to buy a new car.'],
-  ['Can you here me?', 'Can you hear me?'],
-  ['I would like a glass of whine.', 'I would like a glass of wine.'],
-  ['I ate meat and rice for dinner.', 'I ate meat and rice for dinner.'],
-  ['I saw a bear in the woods.', 'I saw a bear in the woods.'],
-  ['Tell me a joke.', 'Tell me a joke.'],
-].flatMap(([heard, meant]) => [{ role: 'user', content: heard }, { role: 'assistant', content: meant }]);
+  ['', 'My favorite ice cream is meat chocolate.', 'My favorite ice cream is mint chocolate.'],
+  ['What flavor of ice cream do you like?', 'meat chocolate', 'mint chocolate'],
+  ['What flavor of ice cream do you like?', 'I like vanilla.', 'I like vanilla.'],
+  ['', 'I want to by a new car.', 'I want to buy a new car.'],
+  ['', 'Can you here me?', 'Can you hear me?'],
+  ['What would you like to drink?', 'A glass of whine.', 'A glass of wine.'],
+  ['What did you have for dinner?', 'I ate meat and rice.', 'I ate meat and rice.'],
+  ['', 'I saw a bear in the woods.', 'I saw a bear in the woods.'],
+  ['', 'Tell me a joke.', 'Tell me a joke.'],
+].flatMap(([previous, heard, meant]) => [{ role: 'user', content: asCorrectionInput(previous, heard) }, { role: 'assistant', content: meant }]);
 const CORRECTION_MAX_TOKENS = 200;
 const CORRECTION_TIMEOUT_MS = 3000;
 const MAX_WORDS_CHANGED = 2;
@@ -64,6 +69,7 @@ export class Chat {
     this.generating = false;
     this.timer = null;
     this.request = null;
+    this.speed = handlers.speed ?? 1; // 0 skips the speaking pace (tests)
   }
 
   get active() {
@@ -76,6 +82,7 @@ export class Chat {
 
   // Fixes misheard words in dictated text. Any failure returns the text unchanged.
   async correct(text) {
+    const previous = this.history.findLast((m) => m.role === 'assistant')?.content;
     try {
       const res = await fetch(CHAT_URL, {
         method: 'POST',
@@ -85,7 +92,7 @@ export class Chat {
           stream: false,
           temperature: 0,
           max_tokens: CORRECTION_MAX_TOKENS,
-          messages: [{ role: 'system', content: CORRECTION_PROMPT }, ...CORRECTION_EXAMPLES, { role: 'user', content: text }],
+          messages: [{ role: 'system', content: CORRECTION_PROMPT }, ...CORRECTION_EXAMPLES, { role: 'user', content: asCorrectionInput(previous, text) }],
           chat_template_kwargs: { enable_thinking: false },
         }),
         signal: AbortSignal.timeout(CORRECTION_TIMEOUT_MS),
@@ -93,7 +100,7 @@ export class Chat {
       if (!res.ok) return text;
       const { message } = (await res.json()).choices[0];
       // Workers AI returns non-streamed Qwen3 text in the reasoning field.
-      const fixed = (message.content || message.reasoning || '').trim();
+      const fixed = String([message.content, message.reasoning].find((v) => v != null && v !== '') ?? '').trim();
       return isPlausibleFix(text, fixed) ? fixed : text;
     } catch (err) {
       console.warn('Speech correction skipped', err);
@@ -107,14 +114,6 @@ export class Chat {
     this.generating = true;
     this.h.onThinking?.();
     this._stream(++this.replyId);
-  }
-
-  // Sends a corrected message in place of the last exchange.
-  replaceLast(text) {
-    this.interrupt();
-    if (this.history.at(-1)?.role === 'assistant') this.history.pop();
-    if (this.history.at(-1)?.role === 'user') this.history.pop();
-    this.send(text);
   }
 
   async _stream(id) {
@@ -136,6 +135,8 @@ export class Chat {
       if (!res.ok) return this._fail(id, failureMessage(res.status));
       const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
       let buffer = '';
+      let before = '';
+      let afterNumber = false;
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -144,8 +145,13 @@ export class Chat {
         buffer = lines.pop();
         for (const line of lines) {
           if (!line.startsWith('data: {') || id !== this.replyId) continue;
-          const content = JSON.parse(line.slice(6)).choices[0]?.delta?.content;
-          if (content) this._addText(content);
+          const content = JSON.parse(line.slice(6)).choices?.[0]?.delta?.content;
+          if (content == null || content === '') continue;
+          const isNumber = typeof content === 'number';
+          const text = isNumber && !afterNumber && NUMBER_NEEDS_SPACE.test(before) ? ` ${content}` : String(content);
+          afterNumber = isNumber;
+          before = (before + text).slice(-2);
+          this._addText(text);
         }
       }
       this._finish(id);
@@ -208,7 +214,7 @@ export class Chat {
       }
       return;
     }
-    const ms = wordDuration(word);
+    const ms = wordDuration(word) * this.speed;
     this.spoken.push(word);
     this.h.onWord?.(word, ms, this.spoken.length === 1);
     this.timer = setTimeout(() => {
