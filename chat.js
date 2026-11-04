@@ -8,6 +8,28 @@ const HISTORY_LIMIT = 10;
 const EMOJI = /[\p{Extended_Pictographic}\u{FE0F}\u{200D}]/gu;
 const SYSTEM_PROMPT = 'You are John Smith, a warm person talking out loud with someone. Stay John Smith at all times. Always reply in one or two short sentences, never more than 25 words, even when explaining something. Answer questions directly and correctly. Do not use emoji, lists or markdown.';
 
+const CORRECTION_PROMPT = 'You fix speech recognition errors. The input is what a speech recognizer heard. A word may be misheard as a similar-sounding word, which makes the phrase odd or impossible. Replace such words with the word the speaker meant. Keep all other words and punctuation exactly as they are. Do not rephrase, answer, translate or add anything. If nothing is wrong, return the input unchanged. Return only the sentence.';
+const CORRECTION_EXAMPLES = [
+  ['My favorite ice cream is meat chocolate.', 'My favorite ice cream is mint chocolate.'],
+  ['I want to by a new car.', 'I want to buy a new car.'],
+  ['Can you here me?', 'Can you hear me?'],
+  ['I would like a glass of whine.', 'I would like a glass of wine.'],
+  ['I ate meat and rice for dinner.', 'I ate meat and rice for dinner.'],
+  ['I saw a bear in the woods.', 'I saw a bear in the woods.'],
+  ['Tell me a joke.', 'Tell me a joke.'],
+].flatMap(([heard, meant]) => [{ role: 'user', content: heard }, { role: 'assistant', content: meant }]);
+const CORRECTION_MAX_TOKENS = 200;
+const CORRECTION_TIMEOUT_MS = 3000;
+const MAX_WORDS_CHANGED = 2;
+
+const wordCount = (text) => text.trim().split(/\s+/).length;
+
+// A correction swaps a few words. Anything else means the model answered or rewrote the text.
+const isPlausibleFix = (original, fixed) =>
+  fixed.length > 0
+  && fixed.length <= original.length * 1.5 + 10
+  && Math.abs(wordCount(fixed) - wordCount(original)) <= MAX_WORDS_CHANGED;
+
 export const isCjk = (word) => CJK.test(word);
 
 const wordDuration = (word) => {
@@ -50,6 +72,33 @@ export class Chat {
 
   load() {
     this.h.onReady?.();
+  }
+
+  // Fixes misheard words in dictated text. Any failure returns the text unchanged.
+  async correct(text) {
+    try {
+      const res = await fetch(CHAT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: MODEL,
+          stream: false,
+          temperature: 0,
+          max_tokens: CORRECTION_MAX_TOKENS,
+          messages: [{ role: 'system', content: CORRECTION_PROMPT }, ...CORRECTION_EXAMPLES, { role: 'user', content: text }],
+          chat_template_kwargs: { enable_thinking: false },
+        }),
+        signal: AbortSignal.timeout(CORRECTION_TIMEOUT_MS),
+      });
+      if (!res.ok) return text;
+      const { message } = (await res.json()).choices[0];
+      // Workers AI returns non-streamed Qwen3 text in the reasoning field.
+      const fixed = (message.content || message.reasoning || '').trim();
+      return isPlausibleFix(text, fixed) ? fixed : text;
+    } catch (err) {
+      console.warn('Speech correction skipped', err);
+      return text;
+    }
   }
 
   send(text) {
@@ -171,6 +220,10 @@ export class Chat {
 
 /** Scripted stand-in so the reply flow can be previewed without the server (?demochat). */
 export class DemoChat extends Chat {
+  async correct(text) {
+    return text;
+  }
+
   send(text) {
     this.interrupt();
     this.generating = true;

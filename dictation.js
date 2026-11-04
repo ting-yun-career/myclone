@@ -228,7 +228,7 @@ export class DemoDictation {
   }
 
   async start() {
-    const lines = ['Hello, can you hear me?', 'This is a demo transcript.', '你好，這是一個測試。'];
+    const lines = ['My favorite flavor is meat chocolate.', 'Hello, can you hear me?', 'This is a demo transcript.', '你好，這是一個測試。'];
     let i = 0;
     const cycle = () => {
       this.h.onSpeechStart?.();

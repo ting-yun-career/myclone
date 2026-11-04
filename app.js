@@ -28,6 +28,7 @@ class App {
     this.thinking = false;
     this.replying = false;
     this.lastMessage = '';
+    this.utteranceId = 0;
     this.chatStatus = 'Connecting to chat model…';
     this.fileProgress = new Map();
 
@@ -43,6 +44,7 @@ class App {
       onSpeechStart: () => {
         if (this.editing) return;
         this.speaking = true;
+        this.utteranceId++;
         this.chat.interrupt();
         this.thinking = false;
         this.replying = false;
@@ -149,6 +151,7 @@ class App {
     this.ui.caption.value = text;
     this.ui.caption.blur();
     this.lastMessage = text;
+    this.utteranceId++;
     this.ui.reply.textContent = '';
     this.thinking = true;
     this.replying = false;
@@ -159,12 +162,28 @@ class App {
   addLine(text) {
     this.showMessage(text);
     this.lastMessage = text;
+    this.correctAndSend(text);
     this.ui.caption.classList.remove('fade');
     void this.ui.caption.offsetWidth;
     this.ui.caption.classList.add('fade');
-    this.thinking = true;
-    this.chat.send(text);
     this.refresh();
+  }
+
+  async correctAndSend(text) {
+    const id = ++this.utteranceId;
+    this.chat.interrupt();
+    this.thinking = true;
+    this.refresh();
+    const fixed = await this.chat.correct(text);
+    if (id !== this.utteranceId) return;
+    if (this.editing) {
+      this.thinking = false;
+      this.refresh();
+      return;
+    }
+    this.showMessage(fixed);
+    this.lastMessage = fixed;
+    this.chat.send(fixed);
   }
 
   showWord(word, ms, first) {
