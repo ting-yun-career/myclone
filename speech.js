@@ -1,4 +1,5 @@
 const MALE_VOICES = ['Google UK English Male', 'Microsoft Guy', 'Microsoft Ryan', 'Microsoft David', 'Microsoft Mark', 'Daniel', 'Alex', 'Fred'];
+const ANDROID_PITCH = 0.7; // Android lists voices by language only, and its default often sounds female
 const MIN_WATCHDOG_MS = 8000;
 const WATCHDOG_MS_PER_CHAR = 150;
 const ECHO_TAIL_MS = 1500;
@@ -76,6 +77,8 @@ export class Speaker {
       utterance.voice = voice;
       utterance.lang = voice.lang;
     }
+    const knownMale = voice && MALE_VOICES.some((name) => voice.name.startsWith(name));
+    if (!knownMale && /Android/i.test(navigator.userAgent)) utterance.pitch = ANDROID_PITCH;
     const wasIdle = !this.speaking;
     this.active.add(utterance);
     // Chrome sometimes never fires end, which would leave the avatar marked as speaking.
