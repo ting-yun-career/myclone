@@ -27,6 +27,7 @@ const CORRECTION_EXAMPLES = [
 const CORRECTION_MAX_TOKENS = 200;
 const CORRECTION_TIMEOUT_MS = 3000;
 const MAX_WORDS_CHANGED = 2;
+const SENTENCE = /^[\s\S]*?(?:[.!?]+\s+|[。！？]+)/;
 
 const wordCount = (text) => text.trim().split(/\s+/).length;
 
@@ -57,7 +58,7 @@ const failureMessage = (status) => {
 
 /**
  * Conversation with Workers AI through the dev server proxy. Replies come out one word at a time, at speaking pace.
- * Handlers: onReady, onThinking, onWord, onReplyEnd, onReplyFailed
+ * Handlers: onReady, onThinking, onWord, onSentence, onReplyEnd, onReplyFailed
  */
 export class Chat {
   constructor(handlers = {}) {
@@ -66,6 +67,7 @@ export class Chat {
     this.replyId = 0;
     this.words = [];
     this.tail = '';
+    this.unspoken = '';
     this.spoken = [];
     this.generating = false;
     this.timer = null;
@@ -167,6 +169,9 @@ export class Chat {
     if (id !== this.replyId) return;
     this.generating = false;
     this._addText(' ');
+    const rest = this.unspoken.trim();
+    this.unspoken = '';
+    if (rest) this.h.onSentence?.(rest);
     if (!this.spoken.length && !this.words.length) this.h.onReplyEnd?.();
   }
 
@@ -188,6 +193,7 @@ export class Chat {
     this.timer = null;
     this.words = [];
     this.tail = '';
+    this.unspoken = '';
     this._remember();
   }
 
@@ -197,12 +203,25 @@ export class Chat {
   }
 
   _addText(text) {
-    this.tail += text.replace(EMOJI, '');
+    const clean = text.replace(EMOJI, '');
+    this.tail += clean;
+    this._queueSpeech(clean);
     const parts = this.tail.match(WORD) || [];
     const open = parts.length && this.tail.endsWith(parts[parts.length - 1]) && !CJK.test(parts[parts.length - 1]);
     this.tail = open ? parts.pop() : '';
     this.words.push(...parts);
     this._pump();
+  }
+
+  // Complete sentences go to the voice as soon as they arrive, ahead of the word-by-word display.
+  _queueSpeech(text) {
+    this.unspoken += text;
+    let match;
+    while ((match = SENTENCE.exec(this.unspoken))) {
+      this.unspoken = this.unspoken.slice(match[0].length);
+      const sentence = match[0].trim();
+      if (sentence) this.h.onSentence?.(sentence);
+    }
   }
 
   _pump() {

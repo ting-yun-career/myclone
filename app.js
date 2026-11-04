@@ -1,6 +1,7 @@
 import { Character } from './character.js';
 import { BrowserDictation, DemoDictation } from './dictation.js';
 import { Chat, DemoChat, isCjk } from './chat.js';
+import { Speaker } from './speech.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -9,6 +10,7 @@ const DEMO_CHAT = params.has('demochat');
 const FAKE_NEURONS = params.get('neurons'); // test hook: ?neurons=9700 pretends 9,700 neurons are used
 const SLEEP_AT = 0.95;
 const NEURON_POLL_MS = 60000;
+const MIC_RESUME_DELAY_MS = 300; // lets the end of the avatar's voice fade before the microphone reopens
 const SLEEP_REASON = { budget: 'chat budget nearly used up', chat: 'chat unavailable' };
 const BUDGET_NOTICE = 'Sleeping. The daily chat budget is nearly used up. It resets at 00:00 UTC.';
 
@@ -40,6 +42,17 @@ class App {
     this.chatStatus = 'Connecting to chat model…';
 
     this.character = new Character($('stage'));
+    this.speaker = new Speaker({
+      onStart: () => {
+        clearTimeout(this.micResumeTimer);
+        this.dictation.pause();
+        this.refresh();
+      },
+      onIdle: () => {
+        this.micResumeTimer = setTimeout(() => this.dictation.resume(), MIC_RESUME_DELAY_MS);
+        this.refresh();
+      },
+    });
     const handlers = {
       onReady: (device) => {
         this.modelReady = true;
@@ -50,6 +63,7 @@ class App {
         this.speaking = true;
         this.utteranceId++;
         this.chat.interrupt();
+        this.speaker.cancel();
         this.thinking = false;
         this.replying = false;
         this.refresh();
@@ -82,6 +96,7 @@ class App {
         this.refresh();
       },
       onWord: (word, ms, first) => this.showWord(word, ms, first),
+      onSentence: (sentence) => this.speaker.speak(sentence),
       onReplyEnd: () => {
         this.thinking = false;
         this.replying = false;
@@ -140,6 +155,7 @@ class App {
   sleep(reason) {
     this.sleepReason = reason;
     this.chat.interrupt();
+    this.speaker.cancel();
     this.speaking = false;
     this.thinking = false;
     this.replying = false;
@@ -214,6 +230,7 @@ class App {
   async correctAndSend(text) {
     const id = ++this.utteranceId;
     this.chat.interrupt();
+    this.speaker.cancel();
     this.thinking = true;
     this.refresh();
     const fixed = await this.chat.correct(text);
@@ -253,7 +270,7 @@ class App {
     if (this.asleep) state = 'sleep';
     else if (this.busy && !this.modelReady) state = 'loading';
     else if (this.speaking) state = 'listening';
-    else if (this.replying) state = 'speaking';
+    else if (this.replying || this.speaker.speaking) state = 'speaking';
     else if (this.thinking) state = 'thinking';
     else if (performance.now() < this.happyUntil) state = 'happy';
     this.character.setState(state);
@@ -274,7 +291,7 @@ class App {
 
   renderStatus() {
     const { neurons } = this;
-    const voice = this.budgetSleep ? 'paused' : this.running ? 'on' : 'off';
+    const voice = this.budgetSleep || this.speaker.speaking ? 'paused' : this.running ? 'on' : 'off';
     const lines = [
       this.asleep ? `Status: Sleeping (${SLEEP_REASON[this.sleepReason]})` : `Status: Awake${DEMO_CHAT ? ' (scripted replies)' : ''}`,
       this.editing ? '' : `Voice: ${voice}`,

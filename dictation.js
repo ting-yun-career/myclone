@@ -8,6 +8,8 @@ export class BrowserDictation {
   constructor(handlers = {}) {
     this.h = handlers;
     this.running = false;
+    this.paused = false;
+    this.active = false;
     this.speaking = false;
     this.interim = '';
   }
@@ -26,7 +28,10 @@ export class BrowserDictation {
   start() {
     return new Promise((resolve, reject) => {
       this.running = true;
-      this.recognition.onstart = () => resolve();
+      this.recognition.onstart = () => {
+        this.active = true;
+        resolve();
+      };
       this.recognition.onerror = (e) => {
         if (e.error === 'no-speech' || e.error === 'aborted') return;
         this.running = false;
@@ -43,11 +48,32 @@ export class BrowserDictation {
       };
       // Chrome ends a session after silence or about a minute, so restart it.
       this.recognition.onend = () => {
+        this.active = false;
         this._closeUtterance();
-        if (this.running) setTimeout(() => this.running && this.recognition.start(), RESTART_DELAY_MS);
+        this._restartSoon();
       };
       this.recognition.start();
     });
+  }
+
+  _restartSoon() {
+    setTimeout(() => {
+      if (this.running && !this.paused && !this.active) this.recognition.start();
+    }, RESTART_DELAY_MS);
+  }
+
+  // Stops listening while the avatar talks, so the microphone does not transcribe its voice.
+  pause() {
+    if (this.paused) return;
+    this.paused = true;
+    this.interim = '';
+    if (this.active) this.recognition.abort();
+  }
+
+  resume() {
+    if (!this.paused) return;
+    this.paused = false;
+    if (!this.active) this._restartSoon();
   }
 
   _onResult(e) {
@@ -116,6 +142,10 @@ export class DemoDictation {
     };
     this.timer = setTimeout(cycle, 800);
   }
+
+  pause() {}
+
+  resume() {}
 
   async stop() {
     clearTimeout(this.timer);
