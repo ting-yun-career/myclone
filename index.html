@@ -3,10 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Listening Avatar — VAD + Whisper</title>
-<!-- Classic scripts: ONNX Runtime then Silero VAD (exposes window.vad) -->
-<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.31.1/dist/ort.wasm.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.31/dist/bundle.min.js"></script>
+<title>Listening Avatar</title>
 <style>
   :root {
     --bg: #0d1016; --panel: #151a23; --line: #232b38; --text: #e8ecf3; --muted: #8b95a7;
@@ -68,9 +65,6 @@
   #status[data-sleeping] strong { color: var(--think); }
   #status span { color: var(--muted); }
 
-  #barWrap { position: absolute; left: 14px; right: 14px; top: 52px; height: 4px; background: var(--line); border-radius: 4px; overflow: hidden; }
-  #bar { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
-
 </style>
 </head>
 <body>
@@ -83,7 +77,6 @@
         <span id="statusVoice"></span>
         <span id="statusNeurons"></span>
       </aside>
-      <div id="barWrap" hidden><div id="bar"></div></div>
       <div id="user">
         <p id="said" aria-live="polite"></p>
         <textarea id="caption" rows="1" maxlength="2000" placeholder="Say something..." aria-label="Your message. Type here or speak. Press Enter to send."></textarea>

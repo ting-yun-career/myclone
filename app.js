@@ -1,13 +1,11 @@
 import { Character } from './character.js';
-import { BrowserDictation, Dictation, DemoDictation } from './dictation.js';
+import { BrowserDictation, DemoDictation } from './dictation.js';
 import { Chat, DemoChat, isCjk } from './chat.js';
 
 const $ = (id) => document.getElementById(id);
-const MODEL = 'onnx-community/whisper-base';
 const params = new URLSearchParams(location.search);
 const DEMO = params.has('demo');
 const DEMO_CHAT = params.has('demochat');
-const WHISPER = params.has('whisper');
 const FAKE_NEURONS = params.get('neurons'); // test hook: ?neurons=9700 pretends 9,700 neurons are used
 const SLEEP_AT = 0.95;
 const NEURON_POLL_MS = 60000;
@@ -26,11 +24,8 @@ class App {
       status: $('status'),
       caption: $('caption'),
       reply: $('reply'),
-      bar: $('bar'),
-      barWrap: $('barWrap'),
     };
     this.speaking = false;
-    this.pending = 0;
     this.modelReady = false;
     this.running = false;
     this.busy = false;
@@ -43,15 +38,11 @@ class App {
     this.lastPoll = 0;
     this.statusText = '';
     this.chatStatus = 'Connecting to chat model…';
-    this.fileProgress = new Map();
 
     this.character = new Character($('stage'));
     const handlers = {
-      onStatus: (t) => this.setStatus(t),
-      onProgress: (p) => this.showProgress(p),
       onReady: (device) => {
         this.modelReady = true;
-        this.ui.barWrap.hidden = true;
         this.setStatus(device === 'demo' ? 'Demo mode' : `Model ready (${device})`);
       },
       onSpeechStart: () => {
@@ -69,10 +60,6 @@ class App {
         this.refresh();
       },
       onFrame: (p) => this.character.setSpeech(this.character.speech * 0.7 + p * 0.3),
-      onPending: (n) => {
-        this.pending = n;
-        this.refresh();
-      },
       onInterim: (text) => {
         if (!this.ignoresSpeech) this.showInterim(text);
       },
@@ -81,7 +68,7 @@ class App {
       },
       onError: (msg) => this.fail(msg),
     };
-    const DictationClass = DEMO ? DemoDictation : WHISPER ? Dictation : BrowserDictation;
+    const DictationClass = DEMO ? DemoDictation : BrowserDictation;
     this.dictation = new DictationClass(handlers);
 
     const ChatClass = DEMO_CHAT ? DemoChat : Chat;
@@ -131,16 +118,6 @@ class App {
 
   setStatus(text) {
     this.ui.pillText.textContent = text;
-  }
-
-  showProgress(p) {
-    if (!p || p.status !== 'progress') return;
-    this.fileProgress.set(p.file, p.progress);
-    const all = [...this.fileProgress.values()];
-    const avg = all.reduce((a, b) => a + b, 0) / all.length;
-    this.ui.barWrap.hidden = false;
-    this.ui.bar.style.width = `${avg.toFixed(0)}%`;
-    this.setStatus(`Downloading model… ${avg.toFixed(0)}%`);
   }
 
   get editing() {
@@ -277,7 +254,7 @@ class App {
     else if (this.busy && !this.modelReady) state = 'loading';
     else if (this.speaking) state = 'listening';
     else if (this.replying) state = 'speaking';
-    else if (this.pending > 0 || this.thinking) state = 'thinking';
+    else if (this.thinking) state = 'thinking';
     else if (performance.now() < this.happyUntil) state = 'happy';
     this.character.setState(state);
     this.ui.pill.dataset.state = state;
@@ -285,7 +262,7 @@ class App {
       const label = {
         idle: this.chatStatus || 'Listening…',
         listening: 'Hearing you',
-        thinking: this.pending > 0 ? 'Transcribing…' : 'Thinking…',
+        thinking: 'Thinking…',
         speaking: 'Speaking',
         happy: 'Got it',
         sleep: 'Sleeping',
@@ -319,7 +296,7 @@ class App {
     this.setStatus('Starting…');
     try {
       this.refresh();
-      await this.dictation.loadModel(MODEL);
+      await this.dictation.loadModel();
       this.modelReady = true;
       this.setStatus('Asking for microphone…');
       await this.dictation.start();
