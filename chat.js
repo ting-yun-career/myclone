@@ -1,8 +1,8 @@
 const CJK_CHARS = '\\u3000-\\u303f\\u3400-\\u9fff\\uf900-\\ufaff\\uff00-\\uffef';
 const WORD = new RegExp(`[${CJK_CHARS}]|[^\\s${CJK_CHARS}]+`, 'g');
 const CJK = new RegExp(`^[${CJK_CHARS}]$`);
-const API = '/api/ollama';
-const MODEL = import.meta.env.VITE_OLLAMA_MODEL;
+const CHAT_URL = '/api/ai/chat/completions';
+const MODEL = import.meta.env.VITE_CF_MODEL;
 const MAX_TOKENS = 150;
 const HISTORY_LIMIT = 10;
 const EMOJI = /[\p{Extended_Pictographic}\u{FE0F}\u{200D}]/gu;
@@ -22,14 +22,14 @@ const wordDuration = (word) => {
 
 const failureMessage = (status) => {
   if (status === 401 || status === 403) return 'The chat server refused the request.';
-  if (status === 404) return 'The chat model is not installed on the server.';
-  if (status === 429) return 'The chat server is busy. Try again soon.';
+  if (status === 404) return 'The chat model is not available.';
+  if (status === 429) return 'The chat limit is reached. Try again later.';
   return 'The chat server is not reachable.';
 };
 
 /**
- * Conversation through the Ollama proxy. Replies come out one word at a time, at speaking pace.
- * Handlers: onReady, onLoadFailed, onThinking, onWord, onReplyEnd, onReplyFailed
+ * Conversation with Workers AI through the dev server proxy. Replies come out one word at a time, at speaking pace.
+ * Handlers: onReady, onThinking, onWord, onReplyEnd, onReplyFailed
  */
 export class Chat {
   constructor(handlers = {}) {
@@ -48,18 +48,8 @@ export class Chat {
     return this.generating || this.timer !== null || this.words.length > 0;
   }
 
-  // Checks that the server answers and has the model. Replies are still attempted if this fails.
-  async load() {
-    try {
-      const res = await fetch(`${API}/models`);
-      if (!res.ok) return this.h.onLoadFailed?.(failureMessage(res.status));
-      const { data } = await res.json();
-      if (!data.some((m) => m.id === MODEL)) return this.h.onLoadFailed?.(failureMessage(404));
-      this.h.onReady?.();
-    } catch (err) {
-      console.error('Chat server check failed', err);
-      this.h.onLoadFailed?.(failureMessage());
-    }
+  load() {
+    this.h.onReady?.();
   }
 
   send(text) {
@@ -82,10 +72,16 @@ export class Chat {
     this.request = new AbortController();
     const messages = [{ role: 'system', content: SYSTEM_PROMPT }, ...this.history.slice(-HISTORY_LIMIT)];
     try {
-      const res = await fetch(`${API}/chat/completions`, {
+      const res = await fetch(CHAT_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: MODEL, stream: true, max_tokens: MAX_TOKENS, messages }),
+        body: JSON.stringify({
+          model: MODEL,
+          stream: true,
+          max_tokens: MAX_TOKENS,
+          messages,
+          chat_template_kwargs: { enable_thinking: false }, // reasoning would use up max_tokens
+        }),
         signal: this.request.signal,
       });
       if (!res.ok) return this._fail(id, failureMessage(res.status));
@@ -175,10 +171,6 @@ export class Chat {
 
 /** Scripted stand-in so the reply flow can be previewed without the server (?demochat). */
 export class DemoChat extends Chat {
-  load() {
-    this.h.onReady?.();
-  }
-
   send(text) {
     this.interrupt();
     this.generating = true;

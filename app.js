@@ -75,10 +75,6 @@ class App {
         this.chatStatus = null;
         this.refresh();
       },
-      onLoadFailed: (message) => {
-        this.chatStatus = message;
-        this.refresh();
-      },
       onThinking: () => {
         this.thinking = true;
         this.refresh();
