@@ -135,7 +135,6 @@ class App {
 
   showMessage(text) {
     this.ui.caption.value = text;
-    this.ui.caption.hidden = false;
   }
 
   onCaptionKey(e) {

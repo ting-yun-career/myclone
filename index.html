@@ -43,7 +43,7 @@
     font: 500 16px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--text);
     width: min(360px, calc(100% - 28px)); field-sizing: content; resize: none;
   }
-  #caption[hidden] { display: none; }
+  #caption::placeholder { color: var(--muted); }
   #caption:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   #reply {
     position: absolute; left: 50%; top: 81%; transform: translateX(-50%);
@@ -66,7 +66,7 @@
       <canvas id="stage"></canvas>
       <div id="pill" data-state="loading"><span class="dot"></span><span id="pillText">Loading character…</span></div>
       <div id="barWrap" hidden><div id="bar"></div></div>
-      <textarea id="caption" rows="1" maxlength="2000" aria-label="Your message. Edit it and press Enter to send it again." hidden></textarea>
+      <textarea id="caption" rows="1" maxlength="2000" placeholder="Say something..." aria-label="Your message. Type here or speak. Press Enter to send."></textarea>
       <div id="reply" aria-live="polite"></div>
     </div>
   </div>
