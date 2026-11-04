@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Listening Avatar self-test</title>
+<style>
+  body { font: 14px/1.5 system-ui, sans-serif; background: #0d1016; color: #e8ecf3; margin: 24px; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid #232b38; vertical-align: top; }
+  .pass { color: #4ade80; } .fail { color: #f87171; }
+  #summary { font-size: 18px; margin: 12px 0; }
+</style>
+</head>
+<body>
+  <h1>Listening Avatar self-test</h1>
+  <p>Runs against the real chat model through the dev proxy. Each case costs about 1 neuron.</p>
+  <div id="summary">Running…</div>
+  <table><thead><tr><th>Group</th><th>Case</th><th>Result</th><th>Output</th></tr></thead><tbody id="rows"></tbody></table>
+  <script type="module" src="./selftest.js"></script>
+</body>
+</html>
