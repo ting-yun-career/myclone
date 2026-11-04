@@ -7,6 +7,7 @@ const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
 const DEMO = params.has('demo');
 const DEMO_CHAT = params.has('demochat');
+const TAP_TO_TALK = !DEMO && (/Android/i.test(navigator.userAgent) || params.has('tap')); // ?tap previews it on desktop
 const FAKE_NEURONS = params.get('neurons'); // test hook: ?neurons=9700 pretends 9,700 neurons are used
 const SLEEP_AT = 0.95;
 const NEURON_POLL_MS = 60000;
@@ -20,6 +21,7 @@ class App {
       pill: $('pill'),
       pillText: $('pillText'),
       said: $('said'),
+      mic: $('mic'),
       statusMain: $('statusMain'),
       statusNeurons: $('statusNeurons'),
       statusSound: $('statusSound'),
@@ -48,6 +50,11 @@ class App {
     this.speaker = new Speaker({ onStart: () => this.refresh(), onIdle: () => this.refresh() });
     const handlers = {
       isEcho: (text) => this.speaker.isEcho(text),
+      onListenChange: () => this.refresh(),
+      onTapError: (message) => {
+        this.ui.reply.textContent = message;
+        this.refresh();
+      },
       onYield: () => {
         this.refresh();
         if (this.tabNoticeShown) return;
@@ -83,7 +90,7 @@ class App {
       onError: (msg) => this.fail(msg),
     };
     const DictationClass = DEMO ? DemoDictation : BrowserDictation;
-    this.dictation = new DictationClass(handlers);
+    this.dictation = new DictationClass(handlers, { tapToTalk: TAP_TO_TALK });
 
     const ChatClass = DEMO_CHAT ? DemoChat : Chat;
     this.chat = new ChatClass({
@@ -111,6 +118,8 @@ class App {
       },
     });
 
+    this.ui.mic.hidden = !TAP_TO_TALK;
+    this.ui.mic.addEventListener('click', () => this.onMicTap());
     this.ui.caption.addEventListener('keydown', (e) => this.onCaptionKey(e));
     this.ui.caption.addEventListener('input', () => {
       this.typing = this.ui.caption.value.trim() !== '';
@@ -225,6 +234,22 @@ class App {
     this.correctAndSend(text);
   }
 
+  onMicTap() {
+    if (this.budgetSleep) {
+      this.ui.reply.textContent = BUDGET_NOTICE;
+      return;
+    }
+    if (!this.dictation.listening) {
+      this.utteranceId++;
+      this.chat.interrupt();
+      this.speaker.cancel();
+      this.thinking = false;
+      this.replying = false;
+    }
+    this.dictation.toggleListening();
+    this.refresh();
+  }
+
   addLine(text) {
     this.showSent(text);
     this.correctAndSend(text);
@@ -273,7 +298,7 @@ class App {
     let state = 'idle';
     if (this.asleep) state = 'sleep';
     else if (this.busy && !this.modelReady) state = 'loading';
-    else if (this.speaking) state = 'listening';
+    else if (this.speaking || this.dictation.listening) state = 'listening';
     else if (this.replying || this.speaker.speaking) state = 'speaking';
     else if (this.thinking) state = 'thinking';
     else if (performance.now() < this.happyUntil) state = 'happy';
@@ -281,8 +306,8 @@ class App {
     this.ui.pill.dataset.state = state;
     if (this.running && this.modelReady) {
       const label = {
-        idle: this.chatStatus || 'Listening…',
-        listening: 'Hearing you',
+        idle: this.chatStatus || (TAP_TO_TALK ? 'Tap the mic to talk' : 'Listening…'),
+        listening: this.speaking ? 'Hearing you' : 'Listening…',
         thinking: 'Thinking…',
         speaking: 'Speaking',
         happy: 'Got it',
@@ -295,13 +320,14 @@ class App {
 
   renderStatus() {
     const { neurons } = this;
-    const voice = this.budgetSleep ? 'paused' : this.dictation.yielded ? 'in another tab' : this.running ? 'on' : 'off';
+    const voice = this.budgetSleep ? 'paused' : this.dictation.yielded ? 'in another tab' : !this.running ? 'off' : !TAP_TO_TALK ? 'on' : this.dictation.listening ? 'listening' : 'tap mic';
     const lines = [
       this.asleep ? `Status: Sleeping (${SLEEP_REASON[this.sleepReason]})` : `Status: Awake${DEMO_CHAT ? ' (scripted replies)' : ''}`,
       this.editing ? '' : `Voice: ${voice}`,
       neurons ? `Token: ${Math.max(0, Math.round(100 - (100 * neurons.used) / neurons.limit))}% left` : 'Token: ?',
     ];
     this.ui.statusSound.hidden = !this.speaker.needsGesture;
+    this.ui.mic.setAttribute('aria-pressed', String(Boolean(this.dictation.listening)));
     const text = lines.join('\n');
     if (text === this.statusText) return;
     this.statusText = text;

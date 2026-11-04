@@ -43,7 +43,17 @@
   }
   #said { margin: 0; overflow-y: auto; overflow-wrap: anywhere; max-height: 9em; }
   #said:empty { display: none; }
-  #caption { width: 100%; overflow: hidden; field-sizing: content; resize: none; }
+  @media (max-width: 640px) { #user { top: 124px; max-height: calc(100% - 138px); } }
+  #inputRow { display: flex; gap: 8px; align-items: flex-start; }
+  #caption { flex: 1; min-width: 0; overflow: hidden; field-sizing: content; resize: none; }
+  #mic {
+    flex: none; width: 44px; height: 44px; display: grid; place-items: center; padding: 0; cursor: pointer;
+    border-radius: 50%; border: 1px solid var(--line); background: rgba(21,26,35,.78); color: var(--text);
+    backdrop-filter: blur(8px); touch-action: manipulation;
+  }
+  #mic[hidden] { display: none; }
+  #mic[aria-pressed="true"] { background: var(--listen); border-color: var(--listen); color: var(--bg); }
+  #mic:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   #caption::placeholder { color: var(--muted); }
   #caption:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   #reply {
@@ -81,7 +91,14 @@
       </aside>
       <div id="user">
         <p id="said" aria-live="polite"></p>
-        <textarea id="caption" rows="1" maxlength="2000" placeholder="Say something..." aria-label="Your message. Type here or speak. Press Enter to send."></textarea>
+        <div id="inputRow">
+          <textarea id="caption" rows="1" maxlength="2000" placeholder="Say something..." aria-label="Your message. Type here or speak. Press Enter to send."></textarea>
+          <button id="mic" type="button" aria-label="Tap to talk" aria-pressed="false" hidden>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/>
+            </svg>
+          </button>
+        </div>
       </div>
       <div id="reply" aria-live="polite"></div>
     </div>

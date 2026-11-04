@@ -2,11 +2,13 @@ const RESTART_DELAY_MS = 250;
 
 /**
  * Live dictation with Chrome's built-in speech recognition. Chrome sends the audio to Google.
- * Handlers: onReady, onSpeechStart, onSpeechEnd, onFrame, onInterim, onText, onError, onYield, isEcho
+ * Android ends sessions after each pause and plays a system sound on every start, so it listens per tap instead.
+ * Handlers: onReady, onSpeechStart, onSpeechEnd, onFrame, onInterim, onText, onError, onYield, isEcho, onListenChange, onTapError
  */
 export class BrowserDictation {
-  constructor(handlers = {}) {
+  constructor(handlers = {}, { tapToTalk = false } = {}) {
     this.h = handlers;
+    this.tapToTalk = tapToTalk;
     this.running = false;
     this.active = false;
     this.speaking = false;
@@ -19,7 +21,7 @@ export class BrowserDictation {
     const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!Recognition) throw new Error('This browser has no built-in speech recognition');
     this.recognition = new Recognition();
-    this.recognition.continuous = true;
+    this.recognition.continuous = !this.tapToTalk;
     this.recognition.interimResults = true;
     this.recognition.lang = navigator.language;
     this.recognition.onresult = (e) => this._onResult(e);
@@ -31,10 +33,15 @@ export class BrowserDictation {
       this.running = true;
       this.recognition.onstart = () => {
         this.active = true;
+        this.h.onListenChange?.();
         resolve();
       };
       this.recognition.onerror = (e) => {
         if (e.error === 'no-speech') return;
+        if (this.tapToTalk) {
+          if (e.error !== 'aborted') this.h.onTapError?.(this._errorMessage(e.error));
+          return;
+        }
         if (e.error === 'aborted') {
           this.yielded = true; // another tab took the session
           this.h.onYield?.();
@@ -48,7 +55,7 @@ export class BrowserDictation {
           return;
         }
         console.error(`Speech recognition error: ${e.error}`);
-        const message = e.error === 'network' ? 'Speech recognition service is not reachable' : 'Speech recognition stopped working';
+        const message = this._errorMessage(e.error);
         reject(new Error(message));
         this.h.onError?.(message);
       };
@@ -56,14 +63,30 @@ export class BrowserDictation {
       this.recognition.onend = () => {
         this.active = false;
         this._closeUtterance();
-        this._restartSoon();
+        this.h.onListenChange?.();
+        if (!this.tapToTalk) this._restartSoon();
       };
       document.addEventListener('visibilitychange', () => this._onVisibilityChange());
       addEventListener('focus', () => this._reclaim());
       addEventListener('pointerdown', () => this._reclaim());
-      if (document.hidden) resolve();
+      if (document.hidden || this.tapToTalk) resolve();
       else this.recognition.start();
     });
+  }
+
+  get listening() {
+    return this.tapToTalk && this.active;
+  }
+
+  // Tap to talk: starts one session, or ends the current one.
+  toggleListening() {
+    if (this.active) this.recognition.stop();
+    else this.recognition.start();
+  }
+
+  _errorMessage(error) {
+    if (error === 'not-allowed' || error === 'service-not-allowed') return 'Microphone permission was denied';
+    return error === 'network' ? 'Speech recognition service is not reachable' : 'Speech recognition stopped working';
   }
 
   // Chrome runs one recognition session at a time, and open tabs would keep aborting each other.
