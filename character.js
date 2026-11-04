@@ -328,6 +328,16 @@ export class Character {
     const s = this.speech;
     const time = this.time;
 
+    if (this.state === 'sleep') {
+      // Eyelids closed, face relaxed, head drooped. Nothing drifts.
+      this.eyeAim = { x: 0, y: 0 };
+      this.talk = null;
+      both('eyeBlink', 1);
+      t.jawOpen = 0.05;
+      pose.pitch = 0.1;
+      return { morphs: t, pose };
+    }
+
     switch (this.state) {
       case 'loading':
         both('browDown', 0.08);
@@ -487,7 +497,8 @@ export class Character {
     this.gaze.x += (this.gazeTarget.x - this.gaze.x) * ease(9);
     this.gaze.y += (this.gazeTarget.y - this.gaze.y) * ease(9);
 
-    if (this.time >= this.nextSaccadeAt) {
+    const asleep = this.state === 'sleep';
+    if (!asleep && this.time >= this.nextSaccadeAt) {
       this.saccadeTarget = { x: rand(-0.09, 0.09), y: rand(-0.06, 0.06) };
       this.nextSaccadeAt = this.time + rand(0.25, 1.1);
     }
@@ -495,7 +506,7 @@ export class Character {
     this.saccade.y += (this.saccadeTarget.y - this.saccade.y) * ease(30);
 
     const { morphs, pose } = this._targets();
-    const blink = this._blink();
+    const blink = asleep ? 0 : this._blink();
 
     // Expressions: smooth towards targets (names missing from targets decay to 0).
     const names = new Set([...Object.keys(this.cur), ...Object.keys(morphs)]);
@@ -533,7 +544,7 @@ export class Character {
       this.pose[k] += (pose[k] - this.pose[k]) * ease(4);
     }
     this.pivot.rotation.set(this.pose.pitch, this.baseYaw + this.pose.yaw, this.pose.roll);
-    if (this.modelSize) this.pivot.position.y = Math.sin(this.time * 1.5) * this.modelSize.y * 0.0025;
+    if (this.modelSize) this.pivot.position.y = asleep ? 0 : Math.sin(this.time * 1.5) * this.modelSize.y * 0.0025;
   }
 
   start() {
