@@ -15,7 +15,7 @@ export const SYSTEM_PROMPT = `
     Do
     Ensure correctness of facts
     State only what you know, nothing more
-    Do offer explain unless asked
+    Do not offer explanations unless asked
 `
   .split("\n")
   .map((line) => line.trim())
