@@ -5,7 +5,8 @@ const API = '/api/ollama';
 const MODEL = import.meta.env.VITE_OLLAMA_MODEL;
 const MAX_TOKENS = 150;
 const HISTORY_LIMIT = 10;
-const SYSTEM_PROMPT = 'You are a helpful, knowledgeable assistant talking out loud with a friend. Answer the question directly and correctly in one or two short sentences. Do not use emoji, lists or markdown.';
+const EMOJI = /[\p{Extended_Pictographic}\u{FE0F}\u{200D}]/gu;
+const SYSTEM_PROMPT = 'You are John Smith, a warm person talking out loud with someone. Stay John Smith at all times. Always reply in one or two short sentences, never more than 25 words, even when explaining something. Answer questions directly and correctly. Do not use emoji, lists or markdown.';
 
 export const isCjk = (word) => CJK.test(word);
 
@@ -144,7 +145,7 @@ export class Chat {
   }
 
   _addText(text) {
-    this.tail += text;
+    this.tail += text.replace(EMOJI, '');
     const parts = this.tail.match(WORD) || [];
     const open = parts.length && this.tail.endsWith(parts[parts.length - 1]) && !CJK.test(parts[parts.length - 1]);
     this.tail = open ? parts.pop() : '';
