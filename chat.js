@@ -1,3 +1,5 @@
+import { SYSTEM_PROMPT } from './system-prompt.js';
+
 const CJK_CHARS = '\\u3000-\\u303f\\u3400-\\u9fff\\uf900-\\ufaff\\uff00-\\uffef';
 const WORD = new RegExp(`[${CJK_CHARS}]|[^\\s${CJK_CHARS}]+`, 'g');
 const CJK = new RegExp(`^[${CJK_CHARS}]$`);
@@ -8,7 +10,6 @@ const HISTORY_LIMIT = 10;
 // The gateway streams a bare number token as a JSON number and drops its leading space.
 const NUMBER_NEEDS_SPACE = /(\p{L}|[,;:!?]|\D\.)$/u;
 const EMOJI = /[\p{Extended_Pictographic}\u{FE0F}\u{200D}]/gu;
-const SYSTEM_PROMPT = 'You are John Smith, a warm person talking out loud with someone. Stay John Smith at all times. Always reply in one or two short sentences, never more than 25 words, even when explaining something. Answer questions directly and correctly. Do not use emoji, lists or markdown.';
 
 const CORRECTION_PROMPT = 'You fix speech recognition errors. The input has two lines. "Previous" is what the listener was replying to. "Heard" is what a speech recognizer heard. A word in "Heard" may be a similar-sounding wrong word, or a spelling mistake. Use "Previous" to judge which word fits. Replace the wrong word with the word the speaker meant. Keep all other words and punctuation exactly as they are. Do not rephrase, answer, translate or add anything. If nothing is wrong, return "Heard" unchanged. Return only the corrected "Heard" text.';
 const asCorrectionInput = (previous, heard) => `Previous: ${previous || '(none)'}\nHeard: ${heard}`;
