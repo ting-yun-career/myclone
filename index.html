@@ -36,13 +36,17 @@
   #pillText { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   @keyframes pulse { 50% { opacity: .35; } }
 
-  #caption {
-    position: absolute; top: 62px; left: 14px; padding: 8px 12px; border-radius: 12px;
-    max-width: min(360px, calc(100% - 28px)); max-height: calc(100% - 76px); overflow: hidden;
-    background: rgba(21,26,35,.78); border: 1px solid var(--line); backdrop-filter: blur(8px);
-    font: 500 16px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--text);
-    width: min(360px, calc(100% - 28px)); field-sizing: content; resize: none;
+  #user {
+    position: absolute; top: 62px; left: 14px; width: min(360px, calc(100% - 28px));
+    max-height: calc(100% - 76px); display: flex; flex-direction: column; gap: 8px;
   }
+  #said, #caption {
+    padding: 8px 12px; border-radius: 12px; background: rgba(21,26,35,.78); border: 1px solid var(--line);
+    backdrop-filter: blur(8px); font: 500 16px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--text);
+  }
+  #said { margin: 0; overflow-y: auto; overflow-wrap: anywhere; max-height: 9em; }
+  #said:empty { display: none; }
+  #caption { width: 100%; overflow: hidden; field-sizing: content; resize: none; }
   #caption::placeholder { color: var(--muted); }
   #caption:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   #reply {
@@ -52,8 +56,17 @@
   }
   #reply .word { animation: wordin .18s ease-out; }
   @keyframes wordin { from { opacity: 0; } }
-  #caption.fade { animation: capin .35s ease-out; }
+  #said.fade { animation: capin .35s ease-out; }
   @keyframes capin { from { opacity: 0; transform: translateY(6px); } }
+
+  #status {
+    position: absolute; top: 14px; right: 14px; display: flex; flex-direction: column; gap: 2px;
+    padding: 8px 12px; border-radius: 12px; background: rgba(21,26,35,.78); border: 1px solid var(--line);
+    backdrop-filter: blur(8px); font-size: 13px; max-width: min(260px, calc(100% - 28px));
+  }
+  #status strong { font-weight: 600; color: var(--listen); }
+  #status[data-sleeping] strong { color: var(--think); }
+  #status span { color: var(--muted); }
 
   #barWrap { position: absolute; left: 14px; right: 14px; top: 52px; height: 4px; background: var(--line); border-radius: 4px; overflow: hidden; }
   #bar { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
@@ -65,8 +78,16 @@
     <div id="view">
       <canvas id="stage"></canvas>
       <div id="pill" data-state="loading"><span class="dot"></span><span id="pillText">Loading character…</span></div>
+      <aside id="status" aria-live="polite">
+        <strong id="statusMain">Status: Awake</strong>
+        <span id="statusVoice"></span>
+        <span id="statusNeurons"></span>
+      </aside>
       <div id="barWrap" hidden><div id="bar"></div></div>
-      <textarea id="caption" rows="1" maxlength="2000" placeholder="Say something..." aria-label="Your message. Type here or speak. Press Enter to send."></textarea>
+      <div id="user">
+        <p id="said" aria-live="polite"></p>
+        <textarea id="caption" rows="1" maxlength="2000" placeholder="Say something..." aria-label="Your message. Type here or speak. Press Enter to send."></textarea>
+      </div>
       <div id="reply" aria-live="polite"></div>
     </div>
   </div>

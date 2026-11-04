@@ -8,12 +8,22 @@ const params = new URLSearchParams(location.search);
 const DEMO = params.has('demo');
 const DEMO_CHAT = params.has('demochat');
 const WHISPER = params.has('whisper');
+const FAKE_NEURONS = params.get('neurons'); // test hook: ?neurons=9700 pretends 9,700 neurons are used
+const SLEEP_AT = 0.95;
+const NEURON_POLL_MS = 60000;
+const SLEEP_REASON = { budget: 'chat budget nearly used up', chat: 'chat unavailable' };
+const BUDGET_NOTICE = 'Sleeping. The daily chat budget is nearly used up. It resets at 00:00 UTC.';
 
 class App {
   constructor() {
     this.ui = {
       pill: $('pill'),
       pillText: $('pillText'),
+      said: $('said'),
+      statusMain: $('statusMain'),
+      statusNeurons: $('statusNeurons'),
+      statusVoice: $('statusVoice'),
+      status: $('status'),
       caption: $('caption'),
       reply: $('reply'),
       bar: $('bar'),
@@ -27,8 +37,11 @@ class App {
     this.happyUntil = 0;
     this.thinking = false;
     this.replying = false;
-    this.lastMessage = '';
     this.utteranceId = 0;
+    this.sleepReason = null;
+    this.neurons = null;
+    this.lastPoll = 0;
+    this.statusText = '';
     this.chatStatus = 'Connecting to chat model…';
     this.fileProgress = new Map();
 
@@ -42,7 +55,7 @@ class App {
         this.setStatus(device === 'demo' ? 'Demo mode' : `Model ready (${device})`);
       },
       onSpeechStart: () => {
-        if (this.editing) return;
+        if (this.ignoresSpeech) return;
         this.speaking = true;
         this.utteranceId++;
         this.chat.interrupt();
@@ -61,10 +74,10 @@ class App {
         this.refresh();
       },
       onInterim: (text) => {
-        if (!this.editing) this.showMessage(text);
+        if (!this.ignoresSpeech) this.showInterim(text);
       },
       onText: (text) => {
-        if (!this.editing) this.addLine(text);
+        if (!this.ignoresSpeech) this.addLine(text);
       },
       onError: (msg) => this.fail(msg),
     };
@@ -83,23 +96,24 @@ class App {
       },
       onWord: (word, ms, first) => this.showWord(word, ms, first),
       onReplyEnd: () => {
+        this.thinking = false;
         this.replying = false;
+        if (Date.now() - this.lastPoll > NEURON_POLL_MS / 3) this.pollNeurons();
         this.refresh();
       },
       onReplyFailed: (message) => {
         this.thinking = false;
         this.replying = false;
         this.ui.reply.textContent = message;
-        this.refresh();
+        this.sleep('chat');
       },
     });
 
     this.ui.caption.addEventListener('keydown', (e) => this.onCaptionKey(e));
-    this.ui.caption.addEventListener('blur', () => {
-      if (!this.ui.caption.value.trim()) this.ui.caption.value = this.lastMessage;
-    });
 
     setInterval(() => this.refresh(), 250); // lets the "happy" state expire
+    this.pollNeurons();
+    setInterval(() => this.pollNeurons(), NEURON_POLL_MS);
   }
 
   async init() {
@@ -133,13 +147,70 @@ class App {
     return document.activeElement === this.ui.caption;
   }
 
-  showMessage(text) {
+  get asleep() {
+    return this.sleepReason !== null;
+  }
+
+  // The budget is nearly gone: stop listening and stop sending.
+  get budgetSleep() {
+    return this.sleepReason === 'budget';
+  }
+
+  get ignoresSpeech() {
+    return this.editing || this.budgetSleep;
+  }
+
+  sleep(reason) {
+    this.sleepReason = reason;
+    this.chat.interrupt();
+    this.speaking = false;
+    this.thinking = false;
+    this.replying = false;
+    this.character.setSpeech(0);
+    this.refresh();
+  }
+
+  wake() {
+    this.sleepReason = null;
+    this.refresh();
+  }
+
+  async pollNeurons() {
+    this.lastPoll = Date.now();
+    try {
+      if (FAKE_NEURONS !== null) {
+        this.neurons = { used: Number(FAKE_NEURONS), limit: 10000 };
+      } else {
+        const res = await fetch('/api/status');
+        if (!res.ok) throw new Error(`status ${res.status}`);
+        const { neuronsUsed, neuronsLimit } = await res.json();
+        this.neurons = { used: neuronsUsed, limit: neuronsLimit };
+      }
+    } catch (err) {
+      console.warn('Neuron usage unavailable', err);
+      this.neurons = null;
+    }
+    const full = this.neurons && this.neurons.used >= SLEEP_AT * this.neurons.limit;
+    if (full && !this.budgetSleep) this.sleep('budget');
+    else if (!full && this.budgetSleep) this.wake();
+    else this.refresh();
+  }
+
+  showInterim(text) {
     this.ui.caption.value = text;
+  }
+
+  // The sent message moves from the input to the line above it.
+  showSent(text) {
+    this.ui.caption.value = '';
+    this.ui.said.textContent = text;
+    this.ui.said.classList.remove('fade');
+    void this.ui.said.offsetWidth;
+    this.ui.said.classList.add('fade');
   }
 
   onCaptionKey(e) {
     if (e.key === 'Escape') {
-      this.ui.caption.value = this.lastMessage;
       this.ui.caption.blur();
       return;
     }
@@ -147,24 +218,19 @@ class App {
     e.preventDefault();
     const text = this.ui.caption.value.trim();
     if (!text) return;
-    this.ui.caption.value = text;
-    this.ui.caption.blur();
-    this.lastMessage = text;
-    this.utteranceId++;
+    this.showSent(text);
     this.ui.reply.textContent = '';
-    this.thinking = true;
     this.replying = false;
-    this.chat.replaceLast(text);
-    this.refresh();
+    if (this.budgetSleep) {
+      this.ui.reply.textContent = BUDGET_NOTICE;
+      return;
+    }
+    this.correctAndSend(text);
   }
 
   addLine(text) {
-    this.showMessage(text);
-    this.lastMessage = text;
+    this.showSent(text);
     this.correctAndSend(text);
-    this.ui.caption.classList.remove('fade');
-    void this.ui.caption.offsetWidth;
-    this.ui.caption.classList.add('fade');
     this.refresh();
   }
 
@@ -175,18 +241,13 @@ class App {
     this.refresh();
     const fixed = await this.chat.correct(text);
     if (id !== this.utteranceId) return;
-    if (this.editing) {
-      this.thinking = false;
-      this.refresh();
-      return;
-    }
-    this.showMessage(fixed);
-    this.lastMessage = fixed;
+    this.ui.said.textContent = fixed;
     this.chat.send(fixed);
   }
 
   showWord(word, ms, first) {
     if (first) this.ui.reply.textContent = '';
+    if (this.sleepReason === 'chat') this.sleepReason = null; // the chat answered again
     this.chatStatus = null;
     this.thinking = false;
     this.replying = true;
@@ -212,7 +273,8 @@ class App {
   refresh() {
     if (this.error) return;
     let state = 'idle';
-    if (this.busy && !this.modelReady) state = 'loading';
+    if (this.asleep) state = 'sleep';
+    else if (this.busy && !this.modelReady) state = 'loading';
     else if (this.speaking) state = 'listening';
     else if (this.replying) state = 'speaking';
     else if (this.pending > 0 || this.thinking) state = 'thinking';
@@ -226,9 +288,28 @@ class App {
         thinking: this.pending > 0 ? 'Transcribing…' : 'Thinking…',
         speaking: 'Speaking',
         happy: 'Got it',
+        sleep: 'Sleeping',
       }[state];
       if (label) this.setStatus(label);
     }
+    this.renderStatus();
+  }
+
+  renderStatus() {
+    const { neurons } = this;
+    const voice = this.budgetSleep ? 'paused' : this.running ? 'on' : 'off';
+    const lines = [
+      this.asleep ? `Status: Sleeping (${SLEEP_REASON[this.sleepReason]})` : `Status: Awake${DEMO_CHAT ? ' (scripted replies)' : ''}`,
+      this.editing ? '' : `Voice: ${voice}`,
+      neurons ? `Token: ${Math.max(0, Math.round(100 - (100 * neurons.used) / neurons.limit))}% left` : 'Token: ?',
+    ];
+    const text = lines.join('\n');
+    if (text === this.statusText) return;
+    this.statusText = text;
+    const { statusMain, statusNeurons, statusVoice, status } = this.ui;
+    [statusMain.textContent, statusVoice.textContent, statusNeurons.textContent] = lines;
+    statusVoice.hidden = !lines[1];
+    status.toggleAttribute('data-sleeping', this.asleep);
   }
 
   // ---- actions -----------------------------------------------------------
