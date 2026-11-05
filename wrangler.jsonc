@@ -1,13 +1,17 @@
 {
-  "name": "listening-avatar",
+  "name": "my-clone",
   "main": "src/worker.js",
   "compatibility_date": "2026-11-04",
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
-    "run_worker_first": ["/api/*"]
+    "run_worker_first": ["/api/*"],
   },
   "ratelimits": [
-    { "name": "CHAT_LIMITER", "namespace_id": "4821", "simple": { "limit": 20, "period": 60 } }
-  ]
+    {
+      "name": "CHAT_LIMITER",
+      "namespace_id": "4821",
+      "simple": { "limit": 20, "period": 60 },
+    },
+  ],
 }
