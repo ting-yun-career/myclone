@@ -75,6 +75,8 @@
   #status[data-sleeping] strong { color: var(--think); }
   #status span { color: var(--muted); }
   #status span[hidden] { display: none; }
+  #status #statusSound b { color: var(--think); font-weight: 600; animation: pulse 1.6s ease-in-out infinite; }
+  @media (prefers-reduced-motion: reduce) { #status #statusSound b { animation: none; } }
 
 </style>
 </head>
@@ -87,7 +89,7 @@
         <strong id="statusMain">Status: Awake</strong>
         <span id="statusVoice"></span>
         <span id="statusNeurons"></span>
-        <span id="statusSound" hidden>Sound: click page to enable</span>
+        <span id="statusSound" hidden>Sound: <b>click page to enable</b></span>
       </aside>
       <div id="user">
         <p id="said" aria-live="polite"></p>
